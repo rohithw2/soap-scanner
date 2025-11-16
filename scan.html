@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Stock Scanner</title>
+</head>
+<body>
+  <h2>Scan a Product</h2>
+
+  <div id="reader" style="width:100%; max-width:400px;"></div>
+
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <script>
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyO44stGrJBgg1cT8VXC0h8UkP1espWojgg2yOcbki4M8I1CPfWnoFiqUp2tEDtQdqs/exec";
+
+    function post(payload) {
+      return fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }).then(r => r.json());
+    }
+
+    function onScanSuccess(decodedText, decodedResult) {
+      html5QrcodeScanner.clear();
+
+      post({ action: "scan", barcode: decodedText })
+        .then(resp => {
+          if (resp.error) {
+            alert("Product not found.");
+            html5QrcodeScanner.render(onScanSuccess);
+            return;
+          }
+
+          const p = resp.product;
+          if (confirm(`Sell 1 x ${p.name}?\nStock left: ${p.quantity}`)) {
+            post({ action: "sell", barcode: decodedText, qty: 1, user: "cashier" })
+              .then(sell => {
+                if (sell.success) alert("Sold! Remaining: " + sell.newQuantity);
+                else alert("Error: " + (sell.error || "Unknown"));
+                html5QrcodeScanner.render(onScanSuccess);
+              });
+          } else {
+            html5QrcodeScanner.render(onScanSuccess);
+          }
+        });
+    }
+
+    const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 200 });
+    html5QrcodeScanner.render(onScanSuccess);
+  </script>
+</body>
+</html>
