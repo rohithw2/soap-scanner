@@ -1,134 +1,94 @@
-<script>
-  
-  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyO44stGrJBgg1cT8VXC0h8UkP1espWojgg2yOcbki4M8I1CPfWnoFiqUp2tEDtQdqs/exec";
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Soap stock scanner</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; padding:16px; }
+    h2 { margin: 6px 0 12px; }
+    #reader { width: 100%; max-width: 420px; margin: 8px 0; }
+  </style>
+</head>
+<body>
+  <h2>Soap stock scanner</h2>
+  <p>Point the camera at a BARCODE. Do NOT scan QR-code text.</p>
 
-  function post(payload){
-    return fetch(APPS_SCRIPT_URL, {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify(payload)
-    }).then(r => r.json());
-  }
+  <div id="reader"></div>
 
-  async function onScanSuccess(decodedText, decodedResult) {
-    // --- DEBUG: show exactly what the camera scanned ---
-    alert("SCANNED: " + decodedText);
+  <!-- QR scanner library -->
+  <script src="https://unpkg.com/html5-qrcode"></script>
 
-    // stop scanner while we process
-    await html5QrcodeScanner.clear();
+  <script>
+    /* 1) YOUR GOOGLE SCRIPT WEB APP URL (must end with /exec) */
+    const APPS_SCRIPT_URL =
+      "https://script.google.com/macros/s/AKfycbzuCkyFVm6pjNv-oav7Upd3vZbnICSb_ML4o6LLf5Wu3WBCA5FPUPrP1SFM2la5s8YuMA/exec";
 
-    console.log('decodedText:', decodedText);
-
-    // first call: check product info
-    try {
-      const scanResp = await post({ action: 'scan', barcode: decodedText });
-      console.log('scan response:', scanResp);
-
-      if (scanResp.error) {
-        // show the error returned by the API
-        alert('Server response: ' + scanResp.error);
-        html5QrcodeScanner.render(onScanSuccess);
-        return;
-      }
-
-      const p = scanResp.product;
-      if (!p) {
-        alert('No product data returned.');
-        html5QrcodeScanner.render(onScanSuccess);
-        return;
-      }
-
-      const confirmSell = confirm(`Sell 1 x ${p.name}?\nStock left: ${p.quantity}`);
-      if (!confirmSell) {
-        html5QrcodeScanner.render(onScanSuccess);
-        return;
-      }
-
-      // second call: perform sell
-      const sellResp = await post({ action: 'sell', barcode: decodedText, qty: 1, user: 'cashier' });
-      console.log('sell response:', sellResp);
-
-      if (sellResp.success) {
-        alert('Sold! Remaining: ' + sellResp.newQuantity);
-      } else if (sellResp.error) {
-        alert('Sell failed: ' + sellResp.error);
-      } else {
-        alert('Unexpected response: ' + JSON.stringify(sellResp));
-      }
-    } catch (err) {
-      console.error('Network or JS error:', err);
-      alert('Network error: ' + err);
-    } finally {
-      html5QrcodeScanner.render(onScanSuccess);
+    /* 2) POST request function */
+    function post(payload){
+      return fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload)
+      }).then(r => r.json());
     }
-  }
 
-  const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 200 });
-  html5QrcodeScanner.render(onScanSuccess);
-</script>
-/exec";
+    /* 3) When barcode is scanned */
+    async function onScanSuccess(decodedText, decodedResult) {
+      alert("SCANNED: " + decodedText);   // Debug
 
-  function post(payload){
-    return fetch(APPS_SCRIPT_URL, {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify(payload)
-    }).then(r => r.json());
-  }
+      await html5QrcodeScanner.clear();
 
-  async function onScanSuccess(decodedText, decodedResult) {
-    // --- DEBUG: show exactly what the camera scanned ---
-    alert("SCANNED: " + decodedText);
+      try {
+        // Step A — check product
+        const scanResp = await post({ action: 'scan', barcode: decodedText });
 
-    // stop scanner while we process
-    await html5QrcodeScanner.clear();
+        if (scanResp.error) {
+          alert("Server error: " + scanResp.error);
+          html5QrcodeScanner.render(onScanSuccess);
+          return;
+        }
 
-    console.log('decodedText:', decodedText);
+        const p = scanResp.product;
+        if (!p) {
+          alert("Product not found!");
+          html5QrcodeScanner.render(onScanSuccess);
+          return;
+        }
 
-    // first call: check product info
-    try {
-      const scanResp = await post({ action: 'scan', barcode: decodedText });
-      console.log('scan response:', scanResp);
+        // ask user to confirm sale
+        const ok = confirm(`Sell 1 x ${p.name}?\nStock left: ${p.quantity}`);
+        if (!ok) {
+          html5QrcodeScanner.render(onScanSuccess);
+          return;
+        }
 
-      if (scanResp.error) {
-        // show the error returned by the API
-        alert('Server response: ' + scanResp.error);
+        // Step B — record sale
+        const sellResp = await post({
+          action: "sell",
+          barcode: decodedText,
+          qty: 1,
+          user: "cashier"
+        });
+
+        if (sellResp.success) {
+          alert("Sold! Remaining stock: " + sellResp.newQuantity);
+        } else {
+          alert("Sell failed: " + sellResp.error);
+        }
+      } catch (err) {
+        alert("Network error: " + err);
+      } finally {
         html5QrcodeScanner.render(onScanSuccess);
-        return;
       }
-
-      const p = scanResp.product;
-      if (!p) {
-        alert('No product data returned.');
-        html5QrcodeScanner.render(onScanSuccess);
-        return;
-      }
-
-      const confirmSell = confirm(`Sell 1 x ${p.name}?\nStock left: ${p.quantity}`);
-      if (!confirmSell) {
-        html5QrcodeScanner.render(onScanSuccess);
-        return;
-      }
-
-      // second call: perform sell
-      const sellResp = await post({ action: 'sell', barcode: decodedText, qty: 1, user: 'cashier' });
-      console.log('sell response:', sellResp);
-
-      if (sellResp.success) {
-        alert('Sold! Remaining: ' + sellResp.newQuantity);
-      } else if (sellResp.error) {
-        alert('Sell failed: ' + sellResp.error);
-      } else {
-        alert('Unexpected response: ' + JSON.stringify(sellResp));
-      }
-    } catch (err) {
-      console.error('Network or JS error:', err);
-      alert('Network error: ' + err);
-    } finally {
-      html5QrcodeScanner.render(onScanSuccess);
     }
-  }
 
-  const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 200 });
-  html5QrcodeScanner.render(onScanSuccess);
-</script>
+    /* 4) Start scanner */
+    const html5QrcodeScanner = new Html5QrcodeScanner(
+      "reader",
+      { fps: 10, qrbox: 200 }
+    );
+    html5QrcodeScanner.render(onScanSuccess);
+  </script>
+</body>
+</html>
