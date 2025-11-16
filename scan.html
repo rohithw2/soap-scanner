@@ -1,95 +1,80 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Soap stock scanner</title>
+  <title>Barcode Scanner</title>
   <style>
-    body { font-family: Arial, Helvetica, sans-serif; padding:16px; color:#111; }
-    h2 { margin: 6px 0 12px; }
-    #reader { width: 100%; max-width: 420px; margin: 8px 0; }
-    .info { font-size: 14px; color:#444; margin-bottom:10px; }
-    button { margin-top:8px; }
+    body { font-family: Arial; background:#111; color:#fff; padding:15px; }
+    video { width:100%; border-radius:10px; }
+    #status { margin-top:10px; font-size:18px; }
   </style>
 </head>
 <body>
-  <h2>Soap stock scanner</h2>
-  <p class="info">Point the camera at a BARCODE (not QR-code text). Allow camera access when asked.</p>
 
-  <div id="reader"></div>
+<h2>Scan Product</h2>
 
-  <!-- html5-qrcode library -->
-  <script src="https://unpkg.com/html5-qrcode"></script>
+<video id="video" autoplay playsinline></video>
+<div id="status">Starting camera…</div>
 
-  <script>
-    // === PUT YOUR APPS SCRIPT WEB APP URL HERE (must end with /exec) ===
-    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby1B7_8gDAo3xClSRdaoCTemJUQflOO8bIPpNKq5RQ8wRs01KNa5ptt2HXo0RSnfEV9ow/exec";
+<script src="https://unpkg.com/@zxing/library@0.18.6/umd/index.min.js"></script>
 
-    // make a POST and return parsed JSON (or throw)
-    function post(payload){
-      return fetch(APPS_SCRIPT_URL, {
+<script>
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw5YqhXZixduhvu2tYyUE5z8p8wu0m6wAa1cDJZkXmVI9ATsPmVuJJALdrys3Fg3JM/exec";
+
+const video = document.getElementById("video");
+const statusEl = document.getElementById("status");
+
+let last = "";
+let reader = new ZXing.BrowserMultiFormatReader();
+
+reader.getVideoInputDevices().then(devices => {
+  const cam = devices[devices.length - 1].deviceId;
+  reader.decodeFromVideoDevice(cam, video, async (result, err) => {
+
+    if (result) {
+      const code = result.text;
+      if (code === last) return;
+      last = code;
+
+      statusEl.innerText = "Scanned: " + code;
+
+      // 1) Scan API
+      const scanRes = await fetch(APPS_SCRIPT_URL, {
         method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify(payload)
-      }).then(r => {
-        // try parse JSON even on errors
-        return r.text().then(text => {
-          try { return JSON.parse(text || '{}'); }
-          catch(e) { throw new Error('Invalid JSON from server: ' + text); }
-        });
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: `action=scan&barcode=${code}`
       });
-    }
+      const scanData = await scanRes.json();
 
-    // called when a barcode is read by the camera
-    async function onScanSuccess(decodedText, decodedResult) {
-      alert("SCANNED: " + decodedText);   // debug: show what camera read
-      await html5QrcodeScanner.clear();   // pause scanner while we talk to server
+      if (scanData.status === "ok") {
+        const ok = confirm(`${scanData.name}\nStock: ${scanData.quantity}\nSell 1?`);
+        if (ok) {
 
-      try {
-        // 1) check product info
-        const scanResp = await post({ action: 'scan', barcode: decodedText });
+          // 2) Sell API
+          const sellRes = await fetch(APPS_SCRIPT_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: `action=sell&barcode=${code}&qty=1`
+          });
+          const sellData = await sellRes.json();
 
-        if (scanResp.error) {
-          alert('Server response: ' + scanResp.error);
-          html5QrcodeScanner.render(onScanSuccess);
-          return;
+          if (sellData.status === "ok") {
+            alert("Sold! Remaining: " + sellData.remaining);
+          } else {
+            alert("Error: " + sellData.message);
+          }
+
         }
-
-        const product = scanResp.product;
-        if (!product) {
-          alert('Product not found on server.');
-          html5QrcodeScanner.render(onScanSuccess);
-          return;
-        }
-
-        // confirm sell
-        const confirmSell = confirm(`Sell 1 x ${product.name}?\nStock left: ${product.quantity}`);
-        if (!confirmSell) {
-          html5QrcodeScanner.render(onScanSuccess);
-          return;
-        }
-
-        // 2) perform sell
-        const sellResp = await post({ action: 'sell', barcode: decodedText, qty: 1, user: 'cashier' });
-
-        if (sellResp.success) {
-          alert('Sold! Remaining: ' + sellResp.newQuantity);
-        } else if (sellResp.error) {
-          alert('Sell failed: ' + sellResp.error);
-        } else {
-          alert('Unexpected response: ' + JSON.stringify(sellResp));
-        }
-      } catch (err) {
-        console.error(err);
-        alert('Network error: ' + (err.message || err));
-      } finally {
-        html5QrcodeScanner.render(onScanSuccess);
+      } else {
+        alert("Product not found!");
       }
-    }
 
-    // start scanner
-    const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 200 });
-    html5QrcodeScanner.render(onScanSuccess);
-  </script>
+      setTimeout(() => { last = ""; }, 1500);
+    }
+  });
+});
+</script>
+
 </body>
 </html>
