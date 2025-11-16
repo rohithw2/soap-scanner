@@ -5,89 +5,90 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Soap stock scanner</title>
   <style>
-    body { font-family: Arial, Helvetica, sans-serif; padding:16px; }
+    body { font-family: Arial, Helvetica, sans-serif; padding:16px; color:#111; }
     h2 { margin: 6px 0 12px; }
     #reader { width: 100%; max-width: 420px; margin: 8px 0; }
+    .info { font-size: 14px; color:#444; margin-bottom:10px; }
+    button { margin-top:8px; }
   </style>
 </head>
 <body>
   <h2>Soap stock scanner</h2>
-  <p>Point the camera at a BARCODE. Do NOT scan QR-code text.</p>
+  <p class="info">Point the camera at a BARCODE (not QR-code text). Allow camera access when asked.</p>
 
   <div id="reader"></div>
 
-  <!-- QR scanner library -->
+  <!-- html5-qrcode library -->
   <script src="https://unpkg.com/html5-qrcode"></script>
 
   <script>
-    /* 1) YOUR GOOGLE SCRIPT WEB APP URL (must end with /exec) */
-    const APPS_SCRIPT_URL =
-     "https://script.google.com/macros/s/AKfycby1B7_8gDAo3xClSRdaoCTemJUQflOO8bIPpNKq5RQ8wRs01KNa5ptt2HXo0RSnfEV9ow/exec"
+    // === PUT YOUR APPS SCRIPT WEB APP URL HERE (must end with /exec) ===
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby1B7_8gDAo3xClSRdaoCTemJUQflOO8bIPpNKq5RQ8wRs01KNa5ptt2HXo0RSnfEV9ow/exec";
 
-    /* 2) POST request function */
+    // make a POST and return parsed JSON (or throw)
     function post(payload){
       return fetch(APPS_SCRIPT_URL, {
         method: "POST",
         headers: {"Content-Type":"application/json"},
         body: JSON.stringify(payload)
-      }).then(r => r.json());
+      }).then(r => {
+        // try parse JSON even on errors
+        return r.text().then(text => {
+          try { return JSON.parse(text || '{}'); }
+          catch(e) { throw new Error('Invalid JSON from server: ' + text); }
+        });
+      });
     }
 
-    /* 3) When barcode is scanned */
+    // called when a barcode is read by the camera
     async function onScanSuccess(decodedText, decodedResult) {
-      alert("SCANNED: " + decodedText);   // Debug
-
-      await html5QrcodeScanner.clear();
+      alert("SCANNED: " + decodedText);   // debug: show what camera read
+      await html5QrcodeScanner.clear();   // pause scanner while we talk to server
 
       try {
-        // Step A — check product
+        // 1) check product info
         const scanResp = await post({ action: 'scan', barcode: decodedText });
 
         if (scanResp.error) {
-          alert("Server error: " + scanResp.error);
+          alert('Server response: ' + scanResp.error);
           html5QrcodeScanner.render(onScanSuccess);
           return;
         }
 
-        const p = scanResp.product;
-        if (!p) {
-          alert("Product not found!");
+        const product = scanResp.product;
+        if (!product) {
+          alert('Product not found on server.');
           html5QrcodeScanner.render(onScanSuccess);
           return;
         }
 
-        // ask user to confirm sale
-        const ok = confirm(`Sell 1 x ${p.name}?\nStock left: ${p.quantity}`);
-        if (!ok) {
+        // confirm sell
+        const confirmSell = confirm(`Sell 1 x ${product.name}?\nStock left: ${product.quantity}`);
+        if (!confirmSell) {
           html5QrcodeScanner.render(onScanSuccess);
           return;
         }
 
-        // Step B — record sale
-        const sellResp = await post({
-          action: "sell",
-          barcode: decodedText,
-          qty: 1,
-          user: "cashier"
-        });
+        // 2) perform sell
+        const sellResp = await post({ action: 'sell', barcode: decodedText, qty: 1, user: 'cashier' });
 
         if (sellResp.success) {
-          alert("Sold! Remaining stock: " + sellResp.newQuantity);
+          alert('Sold! Remaining: ' + sellResp.newQuantity);
+        } else if (sellResp.error) {
+          alert('Sell failed: ' + sellResp.error);
         } else {
-          alert("Sell failed: " + sellResp.error);
+          alert('Unexpected response: ' + JSON.stringify(sellResp));
         }
       } catch (err) {
-        alert("Network error: " + err);
+        console.error(err);
+        alert('Network error: ' + (err.message || err));
       } finally {
         html5QrcodeScanner.render(onScanSuccess);
       }
     }
 
-    /* 4) Start scanner */
-    const html5QrcodeScanner = new Html5QrcodeScanner(
-      "reader",
-      { fps: 10, qrbox: 200 }
-    );
+    // start scanner
+    const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 200 });
     html5QrcodeScanner.render(onScanSuccess);
   </script>
 </body>
